@@ -200,3 +200,144 @@ _skip_if_no_preset() {
   "
   [ "$status" -ne 127 ]  # not "command not found"
 }
+
+# ---------------------------------------------------------------------------
+# Local dev environment detection
+# ---------------------------------------------------------------------------
+
+@test "detect_dev_env finds nothing in an empty project" {
+  run detect_dev_env "$TEST_DIR"
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
+}
+
+@test "detect_dev_env finds lando from .lando.yml" {
+  printf 'name: x\n' > "$TEST_DIR/.lando.yml"
+  run detect_dev_env "$TEST_DIR"
+  [ "$output" = "lando" ]
+}
+
+@test "detect_dev_env finds ddev from .ddev/config.yaml" {
+  mkdir -p "$TEST_DIR/.ddev"
+  printf 'name: x\n' > "$TEST_DIR/.ddev/config.yaml"
+  run detect_dev_env "$TEST_DIR"
+  [ "$output" = "ddev" ]
+}
+
+@test "detect_dev_env finds docker from a compose file" {
+  printf 'services: {}\n' > "$TEST_DIR/docker-compose.yml"
+  run detect_dev_env "$TEST_DIR"
+  [ "$output" = "docker" ]
+}
+
+@test "detect_dev_env finds docker from a Dockerfile" {
+  printf 'FROM scratch\n' > "$TEST_DIR/Dockerfile"
+  run detect_dev_env "$TEST_DIR"
+  [ "$output" = "docker" ]
+}
+
+@test "detect_dev_env reports docker once however many markers match" {
+  printf 'services: {}\n' > "$TEST_DIR/docker-compose.yml"
+  printf 'FROM scratch\n' > "$TEST_DIR/Dockerfile"
+  mkdir -p "$TEST_DIR/.devcontainer"
+  run detect_dev_env "$TEST_DIR"
+  [ "$output" = "docker" ]
+}
+
+@test "detect_dev_env reports several tools when several are present" {
+  printf 'name: x\n' > "$TEST_DIR/.lando.yml"
+  printf 'services: {}\n' > "$TEST_DIR/docker-compose.yml"
+  run detect_dev_env "$TEST_DIR"
+  [ "${lines[0]}" = "lando" ]
+  [ "${lines[1]}" = "docker" ]
+}
+
+# ---------------------------------------------------------------------------
+# What detection writes into the generated config
+# ---------------------------------------------------------------------------
+
+_live_directives() {
+  grep -vE '^[[:space:]]*#' "$1" | grep -vE '^[[:space:]]*$'
+}
+
+@test "a project with no dev environment gets the block commented out" {
+  _skip_if_no_preset "claude-code"
+  run_init --preset claude-code
+  run _live_directives "$TEST_DIR/.wrapit"
+  [[ "$output" != *"docker.sock"* ]]
+  [[ "$output" != *".lando"* ]]
+  # Still present as an opt-in, so the user can find it.
+  grep -q 'docker.sock' "$TEST_DIR/.wrapit"
+}
+
+@test "a ddev project gets its mounts written live" {
+  _skip_if_no_preset "claude-code"
+  mkdir -p "$TEST_DIR/.ddev"
+  printf 'name: x\n' > "$TEST_DIR/.ddev/config.yaml"
+  run_init --preset claude-code
+  run _live_directives "$TEST_DIR/.wrapit"
+  [[ "$output" == *"rw? ~/.ddev"* ]]
+  [[ "$output" == *"rw? ~/.docker"* ]]
+  [[ "$output" == *"rw? /var/run/docker.sock"* ]]
+  [[ "$output" != *"~/.lando"* ]]
+}
+
+@test "a lando project gets the lando mounts, not the ddev ones" {
+  _skip_if_no_preset "claude-code"
+  printf 'name: x\n' > "$TEST_DIR/.lando.yml"
+  run_init --preset claude-code
+  run _live_directives "$TEST_DIR/.wrapit"
+  [[ "$output" == *"rw? ~/.lando"* ]]
+  [[ "$output" == *"rw? ~/.cache/lando"* ]]
+  [[ "$output" == *"rw? /var/run/docker.sock"* ]]
+  [[ "$output" != *"~/.ddev"* ]]
+}
+
+@test "a plain compose project gets the socket but no Lando or ddev paths" {
+  _skip_if_no_preset "claude-code"
+  printf 'services: {}\n' > "$TEST_DIR/docker-compose.yml"
+  run_init --preset claude-code
+  run _live_directives "$TEST_DIR/.wrapit"
+  [[ "$output" == *"rw? /var/run/docker.sock"* ]]
+  [[ "$output" == *"rw? ~/.docker"* ]]
+  [[ "$output" != *"~/.lando"* ]]
+  [[ "$output" != *"~/.ddev"* ]]
+}
+
+@test "the project's own dev-env config is pinned read-only after the rw \$PWD" {
+  _skip_if_no_preset "claude-code"
+  printf 'name: x\n' > "$TEST_DIR/.lando.yml"
+  run_init --preset claude-code
+  # Otherwise the agent could edit .lando.yml and make lando mount anything.
+  grep -q 'ro? \$PWD/\.lando\.yml' "$TEST_DIR/.wrapit"
+  local pwd_line pin_line
+  pwd_line="$(grep -n '^rw  \$PWD$' "$TEST_DIR/.wrapit" | cut -d: -f1)"
+  pin_line="$(grep -n 'ro? \$PWD/\.lando\.yml' "$TEST_DIR/.wrapit" | cut -d: -f1)"
+  [ "$pwd_line" -lt "$pin_line" ]
+}
+
+@test "a ddev project pins .ddev/config.yaml read-only" {
+  _skip_if_no_preset "claude-code"
+  mkdir -p "$TEST_DIR/.ddev"
+  printf 'name: x\n' > "$TEST_DIR/.ddev/config.yaml"
+  run_init --preset claude-code
+  grep -q 'ro? \$PWD/\.ddev/config\.yaml' "$TEST_DIR/.wrapit"
+}
+
+@test "the generated config still parses when a dev environment is detected" {
+  _skip_if_no_preset "generic"
+  printf 'services: {}\n' > "$TEST_DIR/docker-compose.yml"
+  run_init --preset generic
+  # Only optional bindings are added, so this must not fail on a machine
+  # without Docker installed.
+  run parse_wrapit "$TEST_DIR/.wrapit"
+  [ "$status" -eq 0 ]
+}
+
+@test "init warns about the socket when it writes it live" {
+  _skip_if_no_preset "claude-code"
+  printf 'services: {}\n' > "$TEST_DIR/docker-compose.yml"
+  run run_init --preset claude-code
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"SANDBOX ESCAPE PATH"* ]]
+}

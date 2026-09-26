@@ -344,8 +344,24 @@ When run, `--init` interactively walks the user through creating `.wrapit`. The 
    - Rust toolchain (`~/.cargo`, `~/.rustup`)
    - Go workspace (`~/go`)
    - Cloud CLIs (`~/.aws`, `~/.config/gcloud`, `~/.azure`) — offered read-only, with a security warning
-   - Docker socket — warned against; not offered by default
-4. **Security scan.** Before writing, scans the proposed config for dangerous bindings (see Security Checks below) and warns.
+   - Docker socket — see step 3a; not offered as a generic prompt
+3a. **Detects the local dev environment.** `detect_dev_env` looks in `$PWD` for
+   `.lando.yml` (and its variants), `.ddev/config.yaml`, `docker-compose.yml` /
+   `compose.yml`, a `Dockerfile`, or `.devcontainer/`, and reports `lando`, `ddev`
+   and/or `docker`.
+
+   - **Detected:** that tool's paths and `rw? /var/run/docker.sock` are written as
+     live directives, with the escape warning above them. A project that needs
+     containers needs them on every run, so this is not left as an edit. The
+     project's own dev-env config files are pinned with `ro? $PWD/...` *after* the
+     `rw $PWD`, because the agent can otherwise rewrite them and make a legitimate
+     `lando start` mount anything (see [Directive Order](#directive-order)).
+   - **Not detected:** the whole block is written commented out, so opting in is a
+     visible edit.
+
+   Every path added this way is optional (`rw?` / `ro?`), so a generated config
+   still parses on a machine without Docker installed.
+4. **Security scan.** Before writing, scans the proposed config for dangerous bindings (see Security Checks below) and warns. This is where a freshly detected Docker socket is reported, so the user sees it at generation time.
 5. **Writes `.wrapit`.** Outputs the file with a comment header explaining each line.
 6. **Offers `.gitignore` update.** If a `.gitignore` file exists in `$PWD`, asks the user whether to add `.wrapit` to it. Rationale: `.wrapit` may contain machine-specific path references (e.g. `$HOME`-relative paths resolved at init time, or paths unique to the user's toolchain setup) that would not be meaningful or correct for other contributors. The prompt should explain both sides — committing `.wrapit` is useful for sharing sandbox policy with the team; ignoring it is appropriate when the config is personal or environment-specific. The user decides; wrapit does not default either way.
 
@@ -456,9 +472,16 @@ there to be spoken to.
 | `*/podman.sock` | Lets the agent start containers outside the sandbox |
 
 These are non-blocking, because some projects genuinely need them — a Lando or
-ddev workflow does not function without the Docker socket. No preset mounts one:
-the line is offered commented-out in the generated `.wrapit`, so that taking the
-trade is a visible decision in the project's own config.
+ddev workflow does not function without the Docker socket. No *preset* mounts one,
+so no agent gets it merely by being that agent; `--init` writes it per project,
+only when that project carries container markers, and always with the warning
+above it. The decision stays visible in the project's own config, and `--check`
+repeats it on every run.
+
+A rootless daemon's socket is the same kind of path with a much smaller blast
+radius: abusing it yields the daemon's user rather than host root. `--check` does
+not currently distinguish the two, which is a reasonable future refinement — an
+allow-listed endpoint that downgrades the label.
 
 ### Writable agent config inside an `rw` mount
 

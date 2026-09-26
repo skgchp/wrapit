@@ -132,6 +132,34 @@ Put secrets in `file` rather than in the config itself — `.wrapit` is often
 committed. Names in `pass` that are unset on the host are skipped silently, so
 listing a few extras costs nothing.
 
+### Container work
+
+`wrapit --init` looks for `.lando.yml`, `.ddev/config.yaml`, a Compose file, a
+`Dockerfile` or a `.devcontainer/` in the project. When it finds one it writes
+that tool's mounts, and the Docker socket, as live directives — a project that
+needs containers needs them on every run. When it finds none, the whole block is
+written commented out, so opting in stays a visible edit. `wrapit --check` flags
+the socket either way, and so does `--init` as it writes the file.
+
+Be clear-eyed about what that costs. The socket is host root: one
+`POST /containers/create` with `Privileged: true` or `Binds: ["/:/host"]` and the
+rest of the config is decoration. It is in the generated file because the work
+does not happen without it, not because it is safe. Two things reduce it:
+
+- **Point it at a rootless daemon.** Abusing a rootless socket yields the daemon's
+  user, not host root. Replace the socket line with `rw? $XDG_RUNTIME_DIR/docker.sock`
+  and add `set = DOCKER_HOST=unix://$XDG_RUNTIME_DIR/docker.sock` under `[env]`.
+  Running that daemon as a dedicated user that owns nothing of yours reduces it
+  further still.
+- **Pin the dev environment's own config.** `.lando.yml` and `.ddev/config.yaml`
+  live in `$PWD`, which the agent can write, so an edit there turns a legitimate
+  `lando start` into "mount anything, run anything". `--init` writes
+  `ro? $PWD/.lando.yml` and friends after the `rw $PWD`, where later-wins makes
+  them read-only. Comment them out if the agent genuinely needs to edit them.
+
+Endpoint-filtering socket proxies do not help here: they gate by API path, and the
+path you have to allow is the one that escapes.
+
 ### User-level defaults
 
 `~/.config/wrapit/defaults.wrapit` is merged before every project's `.wrapit`, so
@@ -157,7 +185,7 @@ file breaks every project on the machine.
 - An agent with network access can exfiltrate anything it can read in the sandbox
 - The agent has full write access to `$PWD` — it can delete your work
 - A sufficiently determined agent could potentially escape; this targets mistakes, not adversaries
-- Mounting the Docker socket (for Lando, ddev, or any container work) hands over trivial root on the host and undoes the rest of the config. No preset mounts it; `wrapit --check` flags it wherever it appears
+- Mounting the Docker socket (for Lando, ddev, or any container work) hands over trivial root on the host and undoes the rest of the config. No preset mounts it, but `wrapit --init` does write it for a project that carries container markers — see [Container work](#container-work) — and `wrapit --check` flags it on every run
 
 ## Creating a custom preset
 
