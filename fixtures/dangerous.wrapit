@@ -1,0 +1,3 @@
+rw /
+rw ~/.ssh
+rw /var/run/docker.sock

@@ -1,0 +1,13 @@
+---
+name: pi
+binary: pi
+description: Pi coding agent
+---
+# ── Pi agent data ─────────────────────────────────────────────────────────────
+# Read/write: stores sessions, extensions, and installed packages.
+# Override location with $PI_CODING_AGENT_DIR if needed.
+rw  ~/.pi/agent
+
+# ── npm package cache ──────────────────────────────────────────────────────────
+# Read/write: cached packages persist across sessions.
+rw  ~/.npm

@@ -1,0 +1,16 @@
+---
+name: opencode
+binary: opencode
+description: OpenCode AI coding assistant
+---
+# ── OpenCode config ────────────────────────────────────────────────────────────
+# Read/write: stores settings, custom commands, and model configuration.
+rw  ~/.config/opencode
+
+# ── OpenCode data ──────────────────────────────────────────────────────────────
+# Read/write: stores session history and agent state.
+rw  ~/.local/share/opencode
+
+# ── npm package cache ──────────────────────────────────────────────────────────
+# Read/write: cached packages persist across sessions.
+rw  ~/.npm

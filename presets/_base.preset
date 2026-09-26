@@ -1,0 +1,38 @@
+---
+name: _base
+description: Common base included in all presets (sandbox, network, git identity)
+---
+# ── Sandbox ────────────────────────────────────────────────────────────────────
+# SSH agent socket is forwarded so git push/clone works without exposing keys.
+# PID namespace and die_with_parent keep the sandbox lifecycle clean.
+[sandbox]
+ssh_agent       = true
+unshare_pid     = true
+die_with_parent = true
+tmpfs_tmp       = true
+
+# ── Network ────────────────────────────────────────────────────────────────────
+# Allow outbound network access. Set to false for air-gapped workflows.
+[network]
+enabled = true
+
+# ── Git identity ───────────────────────────────────────────────────────────────
+# Read-only: agent can commit with your identity but cannot change git config.
+ro  ~/.gitconfig
+ro? ~/.config/git
+
+# ── Local dev environments (Lando / ddev) ──────────────────────────────────────
+# Read/write: global config, cache, certs, plugins, and runtime state.
+# Lando installs versioned binaries to ~/.cache/lando/<ver>/bin/lando and
+# symlinks ~/.lando/bin/lando to the active version — both directories must be
+# mounted or the symlink target is unreachable inside the sandbox.
+# ddev uses /usr/bin/ddev (covered by the hardcoded /usr ro mount).
+rw? ~/.lando
+rw? ~/.cache/lando
+rw? ~/.ddev
+# Docker socket: required for both tools to manage containers. WARNING: this
+# grants the agent the ability to spawn arbitrary containers, which is a
+# potential sandbox escape. Accept this risk only when the agent needs to run
+# dev environment commands (lando start, ddev exec, etc.). Remove this line for
+# projects that do not use Lando or ddev.
+rw? /var/run/docker.sock

@@ -1,0 +1,7 @@
+---
+name: generic
+binary: ""
+description: Generic preset with no agent-specific paths (base only)
+---
+# No agent-specific paths — includes only the common base (git identity, SSH
+# agent, sandbox settings). Add project-specific bindings in the section below.

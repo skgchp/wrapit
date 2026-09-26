@@ -1,0 +1,12 @@
+---
+name: amp
+binary: amp
+description: Amp AI coding agent by Sourcegraph
+---
+# ── Amp config ────────────────────────────────────────────────────────────────
+# Read/write: stores auth tokens and user settings.
+rw  ~/.config/amp
+
+# ── Amp data ──────────────────────────────────────────────────────────────────
+# Read/write: stores session history and agent state.
+rw  ~/.local/share/amp

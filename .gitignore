@@ -1,0 +1,9 @@
+*.swp
+*.bak
+*.orig
+.DS_Store
+.idea/
+.vscode/
+*.iml
+/tmp/wrapit-test-*
+.wrapit

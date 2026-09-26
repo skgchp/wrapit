@@ -1,0 +1,12 @@
+---
+name: qwen-code
+binary: qwen
+description: Alibaba Qwen Code AI assistant (fork of Gemini CLI)
+---
+# ── Qwen Code config and auth ──────────────────────────────────────────────────
+# Read/write: stores auth tokens and user configuration.
+rw  ~/.qwen
+
+# ── npm package cache ──────────────────────────────────────────────────────────
+# Read/write: cached packages persist across sessions.
+rw  ~/.npm

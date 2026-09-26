@@ -1,0 +1,8 @@
+---
+name: aider
+binary: aider
+description: Aider AI pair programming tool
+---
+# ── Aider data ─────────────────────────────────────────────────────────────────
+# Read/write: stores conversation history, model config, and session state.
+rw  ~/.aider

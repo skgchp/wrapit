@@ -1,0 +1,13 @@
+---
+name: gemini-cli
+binary: gemini
+description: Google Gemini CLI coding agent
+---
+# ── Gemini CLI config and auth ─────────────────────────────────────────────────
+# Read/write: stores auth tokens and user configuration.
+# Project-level .gemini/ directories live inside $PWD (already rw).
+rw  ~/.gemini
+
+# ── npm package cache ──────────────────────────────────────────────────────────
+# Read/write: cached packages persist across sessions.
+rw  ~/.npm

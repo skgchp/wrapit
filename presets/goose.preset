@@ -1,0 +1,12 @@
+---
+name: goose
+binary: goose
+description: Block's Goose AI coding agent
+---
+# ── Goose config ───────────────────────────────────────────────────────────────
+# Read/write: stores provider settings and user configuration.
+rw  ~/.config/goose
+
+# ── Goose data ─────────────────────────────────────────────────────────────────
+# Read/write: stores session history and agent state.
+rw  ~/.local/share/goose

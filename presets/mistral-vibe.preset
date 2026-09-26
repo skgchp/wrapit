@@ -1,0 +1,16 @@
+---
+name: mistral-vibe
+binary: vibe
+description: Mistral Vibe coding agent (installed via uv)
+---
+# ── Vibe config and auth ───────────────────────────────────────────────────────
+# Read/write: stores .env with API key and config.toml.
+rw  ~/.vibe
+
+# ── uv local bin ──────────────────────────────────────────────────────────────
+# Read-only: exposes the vibe binary installed by uv into ~/.local/bin.
+ro? ~/.local/bin
+
+# ── uv tool cache ─────────────────────────────────────────────────────────────
+# Read/write (optional): cache persists across sessions to speed up installs.
+rw? ~/.cache/uv

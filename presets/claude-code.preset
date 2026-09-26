@@ -1,0 +1,20 @@
+---
+name: claude-code
+binary: claude
+description: Claude Code AI coding assistant by Anthropic
+---
+# ── Node.js runtime ────────────────────────────────────────────────────────────
+# Read-only: agent uses node/npm from your version manager.
+ro? ~/.nvm
+ro? ~/.fnm
+ro? ~/.volta
+ro? ~/.asdf
+
+# ── npm package cache ──────────────────────────────────────────────────────────
+# Read/write: cached packages persist across sessions, speeding up npm install.
+rw  ~/.npm
+
+# ── Claude Code credentials ────────────────────────────────────────────────────
+# Read/write: stores session token so you don't re-authenticate every run.
+rw  ~/.claude
+rw? ~/.claude.json

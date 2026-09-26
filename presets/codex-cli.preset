@@ -1,0 +1,12 @@
+---
+name: codex-cli
+binary: codex
+description: OpenAI Codex CLI coding agent
+---
+# ── Codex CLI data ─────────────────────────────────────────────────────────────
+# Read/write: stores auth tokens and agent configuration.
+rw  ~/.codex
+
+# ── npm package cache ──────────────────────────────────────────────────────────
+# Read/write: cached packages persist across sessions.
+rw  ~/.npm
