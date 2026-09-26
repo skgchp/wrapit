@@ -4,10 +4,28 @@ binary: pi
 description: Pi coding agent
 ---
 # ── Pi agent data ─────────────────────────────────────────────────────────────
-# Read/write: stores sessions, extensions, and installed packages.
-# Override location with $PI_CODING_AGENT_DIR if needed.
-rw  ~/.pi/agent
+# Read/write: pi keeps state at both levels — sessions and auth.json in ~/.pi,
+# extensions and installed packages in ~/.pi/agent — so mounting only the inner
+# directory leaves a sandboxed pi unable to see its own login, re-prompting
+# every run. Override the location with $PI_CODING_AGENT_DIR if needed.
+rw  ~/.pi
+
+# Read-only overrides on top of that rw mount. These two files decide which
+# model endpoint the agent talks to and which hosts it may fetch, so an agent
+# that can write them can repoint its own inference and widen its own SSRF
+# allow-list from inside the sandbox. Later directives win, so these carve
+# read-only holes in the rw mount above — the order matters.
+ro? ~/.pi/agent/models.json
+ro? ~/.pi/agent/web-search.json
 
 # ── npm package cache ──────────────────────────────────────────────────────────
 # Read/write: cached packages persist across sessions.
 rw  ~/.npm
+
+# ── Environment ────────────────────────────────────────────────────────────────
+# The base above starts the sandbox with an empty environment, so the keys this
+# agent reads have to be named here. Names that are unset on the host are
+# skipped silently; add any others your setup uses.
+[env]
+pass  = LLM_API_KEY ANTHROPIC_API_KEY OPENAI_API_KEY
+pass  = FIRECRAWL_API_KEY

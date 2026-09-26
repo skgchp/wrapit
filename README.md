@@ -16,8 +16,26 @@ The remaining risks are worth being straight about: an agent with network access
 
 ## Install
 
+There is no `curl | bash` one-liner. `install.sh` copies `wrapit`, `lib/` and
+`presets/` out of its own directory, so it needs the source tree beside it — and
+a tool whose job is to confine an agent is a poor candidate for an install path
+that pipes an unread script into a shell.
+
 ```bash
+git clone https://github.com/skgchp/wrapit.git
+cd wrapit
 bash install.sh
+```
+
+This installs to `~/.local/share/wrapit`, symlinks `~/.local/bin/wrapit`, and
+appends a `PATH` block to whichever of `~/.bashrc`, `~/.zshrc` and the fish
+config exist — only when `~/.local/bin` is not already on your `PATH`.
+
+If your dotfiles are generated from a template, pass `--no-path`: an appended
+block would be lost, silently, on the next regeneration.
+
+```bash
+bash install.sh --no-path    # prints the PATH line for you to place yourself
 ```
 
 ## Quick start
@@ -67,12 +85,59 @@ enabled = true          # false to isolate network entirely
 ssh_agent       = true  # forward SSH agent socket (never exposes key files)
 tmpfs_tmp       = true  # isolated /tmp
 unshare_pid     = true
+unshare_ipc     = true
+unshare_uts     = true
+unshare_cgroup  = true
 die_with_parent = true
+
+[env]
+clear = true                      # start from an empty environment
+pass  = TZ ANTHROPIC_API_KEY      # named variables, taken from your shell
+file  = ~/.config/wrapit/env      # KEY=VALUE lines, chmod 600 — for secrets
+set   = NODE_ENV=development      # a literal value
 ```
 
 `$PWD` is always mounted read/write. Paths support `~`, `$PWD`, `$XDG_CONFIG_HOME`, and arbitrary `$VAR` expansion.
 
 Built-in presets: `claude-code`, `aider`, `codex-cli`, `opencode`, `gemini-cli`, `qwen-code`, `mistral-vibe`, `pi`, `goose`, `amp`, `generic`.
+
+### Order matters
+
+Directives are applied in order and a later one wins, because that is how
+`bwrap` applies mounts. This is how you say "writable, except for this":
+
+```ini
+rw  ~/.pi                         # the agent needs this tree
+ro? ~/.pi/agent/models.json       # ...but must not repoint its own models
+ro? ~/.pi/agent/web-search.json   # ...or widen its own network reach
+```
+
+Reversing those lines hands the agent both files: the `rw` mount is applied last
+and covers them again. `wrapit --check` warns when a known-sensitive file is left
+writable this way.
+
+### The environment
+
+Without an `[env]` section the sandbox inherits your shell's environment in full.
+That is convenient, and it is also the one place the tool is not
+deny-by-default — `AWS_SECRET_ACCESS_KEY`, `GITHUB_TOKEN` and a `DATABASE_URL`
+from a `direnv` you have forgotten you are in all reach the agent.
+
+`clear = true` starts from nothing and hands back only what you name. **Every
+preset sets it**, listing that agent's own API keys, so a config from
+`wrapit --init` is closed by default. A `.wrapit` you wrote by hand keeps its
+existing behaviour until you add the section: the default for `clear` is `false`.
+
+Put secrets in `file` rather than in the config itself — `.wrapit` is often
+committed. Names in `pass` that are unset on the host are skipped silently, so
+listing a few extras costs nothing.
+
+### User-level defaults
+
+`~/.config/wrapit/defaults.wrapit` is merged before every project's `.wrapit`, so
+the project file wins on any setting or path it also covers. Keep every binding
+there optional (`ro?` / `rw?`): a missing path is an error, and an error in that
+file breaks every project on the machine.
 
 ## What the sandbox protects
 
@@ -84,12 +149,15 @@ Built-in presets: `claude-code`, `aider`, `codex-cli`, `opencode`, `gemini-cli`,
 | Other projects | Not mounted |
 | Process list | New PID namespace; agent sees only its own processes |
 | Host `/tmp` | Replaced with an isolated tmpfs |
+| IPC, hostname, cgroups | Separate IPC, UTS and cgroup namespaces |
+| Shell environment | With `[env] clear = true` (all presets), only named variables are passed |
 
 ## What it does not protect
 
 - An agent with network access can exfiltrate anything it can read in the sandbox
 - The agent has full write access to `$PWD` — it can delete your work
 - A sufficiently determined agent could potentially escape; this targets mistakes, not adversaries
+- Mounting the Docker socket (for Lando, ddev, or any container work) hands over trivial root on the host and undoes the rest of the config. No preset mounts it; `wrapit --check` flags it wherever it appears
 
 ## Creating a custom preset
 
@@ -116,7 +184,23 @@ rw  ~/.my-agent
 
 **Section comment convention:** Each group of bindings should have a comment header using the `# ── Title ──` format and a one-line explanation of what is mounted and why.
 
-The common base (sandbox settings, network, git identity) is automatically prepended by wrapit — you only need to list your agent's specific paths.
+**Environment:** the common base sets `[env] clear = true`, so name the variables
+your agent reads in its own `[env] pass` line. Names unset on the host are skipped
+silently.
+
+```ini
+[env]
+pass  = MY_AGENT_API_KEY MY_AGENT_BASE_URL
+```
+
+The common base (sandbox settings, network, the non-secret part of `[env]`, git
+identity) is automatically prepended by wrapit — you only need to list your
+agent's specific paths and keys.
+
+Because the base is prepended to *every* preset, anything in it is opted out of
+rather than into, so nothing belongs there that some agents would not want — in
+particular no sandbox-escape path. Optional tooling like the Docker socket is
+offered commented-out in the generated project section instead.
 
 **To test your preset:**
 

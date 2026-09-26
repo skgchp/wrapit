@@ -10,6 +10,9 @@ setup() {
 
   WRAPIT="${BATS_TEST_DIRNAME}/../wrapit"
   TEST_DIR="$(mktemp -d)"
+  # The user defaults file is merged into every run, so tests must not pick up
+  # whatever the developer happens to have installed.
+  export WRAPIT_DEFAULTS_FILE=""
   ORIG_PWD="$PWD"
   cd "$TEST_DIR"
 
@@ -175,4 +178,111 @@ teardown() {
   run "$WRAPIT" echo hello
   [ "$status" -eq 1 ]
   [[ "$output" == *"does not exist"* ]]
+}
+
+# ---------------------------------------------------------------------------
+# --test harness (bats:require-bwrap)
+# ---------------------------------------------------------------------------
+
+@test "--test reports every check as passing on a working sandbox" {
+  # bats:require-bwrap
+  # The whole point: the harness used to eval its own command string, which
+  # destroyed the quoting of every test and reported FAIL six times over on a
+  # sandbox that was fine.
+  run "$WRAPIT" --test
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"0 failed"* ]]
+  [[ "$output" != *"FAIL"* ]]
+}
+
+@test "--test leaves the ro file it targets untouched on the host" {
+  # bats:require-bwrap
+  # T2 appends to a ro-mounted file. Under eval that redirection was performed
+  # by the host shell, so every --test run appended to the real ~/.gitconfig.
+  # The setup config mounts ro ~/.gitconfig, which is the file T2 picks.
+  [ -f "$HOME/.gitconfig" ] || skip "no ~/.gitconfig to check"
+  local before after
+  before="$(cksum < "$HOME/.gitconfig")"
+  run "$WRAPIT" --test
+  after="$(cksum < "$HOME/.gitconfig")"
+  [ "$before" = "$after" ]
+}
+
+@test "--test on a ro mount under HOME exercises T2 rather than skipping it" {
+  # bats:require-bwrap
+  run "$WRAPIT" --test
+  [[ "$output" == *"T2"* ]]
+  # ~/.gitconfig is mounted ro by the setup config, so T2 has something to assert.
+  [[ "$output" != *"SKIP  T2"* ]]
+}
+
+# ---------------------------------------------------------------------------
+# Environment isolation end to end
+# ---------------------------------------------------------------------------
+
+@test "with [env] clear = true an unlisted host variable is not visible" {
+  # bats:require-bwrap
+  printf '[sandbox]\ntmpfs_tmp = true\n\n[env]\nclear = true\npass = WRAPIT_ALLOWED\n\nro ~/.gitconfig\n' \
+    > "$TEST_DIR/.wrapit"
+  WRAPIT_ALLOWED=yes WRAPIT_DENIED=no run "$WRAPIT" bash -c 'printf "%s/%s" "${WRAPIT_ALLOWED:-unset}" "${WRAPIT_DENIED:-unset}"'
+  [ "$status" -eq 0 ]
+  [ "$output" = "yes/unset" ]
+}
+
+@test "without an [env] section the host environment is still inherited" {
+  # bats:require-bwrap
+  WRAPIT_INHERITED=yes run "$WRAPIT" bash -c 'printf "%s" "${WRAPIT_INHERITED:-unset}"'
+  [ "$status" -eq 0 ]
+  [ "$output" = "yes" ]
+}
+
+@test "an [env] set value containing spaces arrives intact" {
+  # bats:require-bwrap
+  printf '[sandbox]\ntmpfs_tmp = true\n\n[env]\nclear = true\nset = WRAPIT_PHRASE=hello world\n\nro ~/.gitconfig\n' \
+    > "$TEST_DIR/.wrapit"
+  run "$WRAPIT" bash -c 'printf "%s" "$WRAPIT_PHRASE"'
+  [ "$status" -eq 0 ]
+  [ "$output" = "hello world" ]
+}
+
+# ---------------------------------------------------------------------------
+# Read-only override inside a read-write tree
+# ---------------------------------------------------------------------------
+
+@test "a ro directive after an rw mount makes that file unwritable" {
+  # bats:require-bwrap
+  mkdir -p "$TEST_DIR/tree"
+  printf 'pinned\n' > "$TEST_DIR/tree/pinned.json"
+  printf 'free\n' > "$TEST_DIR/tree/other.json"
+  printf '[sandbox]\ntmpfs_tmp = true\n\nrw %s/tree\nro %s/tree/pinned.json\n' \
+    "$TEST_DIR" "$TEST_DIR" > "$TEST_DIR/.wrapit"
+
+  # The pinned file cannot be written...
+  run "$WRAPIT" bash -c 'printf x >> "$1"' sh "$TEST_DIR/tree/pinned.json"
+  [ "$status" -ne 0 ]
+  [ "$(cat "$TEST_DIR/tree/pinned.json")" = "pinned" ]
+
+  # ...while the rest of the tree still can.
+  run "$WRAPIT" bash -c 'printf x >> "$1"' sh "$TEST_DIR/tree/other.json"
+  [ "$status" -eq 0 ]
+}
+
+# ---------------------------------------------------------------------------
+# Generated config
+# ---------------------------------------------------------------------------
+
+@test "a generated config does not mount the docker socket" {
+  rm -f "$TEST_DIR/.wrapit"
+  run "$WRAPIT" --init --preset claude-code
+  [ "$status" -eq 0 ]
+  # Present as a commented-out opt-in, never as a live directive.
+  ! grep -qE '^[[:space:]]*rw\??[[:space:]]+/var/run/docker\.sock' "$TEST_DIR/.wrapit"
+  grep -q 'docker.sock' "$TEST_DIR/.wrapit"
+}
+
+@test "a generated config starts from an empty environment" {
+  rm -f "$TEST_DIR/.wrapit"
+  run "$WRAPIT" --init --preset claude-code
+  [ "$status" -eq 0 ]
+  grep -qE '^[[:space:]]*clear[[:space:]]*=[[:space:]]*true' "$TEST_DIR/.wrapit"
 }

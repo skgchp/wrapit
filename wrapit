@@ -210,9 +210,18 @@ if [ "$do_check" = "true" ]; then
     printf 'wrapit: no .wrapit file found. Run `wrapit --init` to create one.\n' >&2
     exit 1
   }
+  check_status=0
+  # The user defaults file is merged into every project, so scan it too.
+  defaults="$(wrapit_defaults_file)"
+  if [ -n "$defaults" ] && [ -f "$defaults" ]; then
+    printf 'Checking %s\n' "$defaults"
+    # shellcheck disable=SC2086
+    check_wrapit "$defaults" $force_flag || check_status=1
+    printf 'Checking %s\n' "$config"
+  fi
   # shellcheck disable=SC2086
-  check_wrapit "$config" $force_flag
-  exit $?
+  check_wrapit "$config" $force_flag || check_status=1
+  exit $check_status
 fi
 
 _check_bwrap
@@ -227,33 +236,13 @@ if [ "$do_test" = "true" ]; then
   exit $?
 fi
 
-# Build bwrap args into an array by word-splitting each output line.
-# Each line from build_bwrap_args is a logical group like "--ro-bind /src /dst"
-# or a single flag like "--share-net". Paths and flag values never contain spaces.
-bwrap_args_file="$(mktemp)"
-build_bwrap_args "$config" > "$bwrap_args_file" || {
-  rm -f "$bwrap_args_file"
-  exit 1
-}
-
-bwrap_args=()
-while IFS= read -r line; do
-  [ -z "$line" ] && continue
-  # Word-split the line into individual bwrap arguments
-  old_ifs="$IFS"
-  IFS=' '
-  # shellcheck disable=SC2086
-  set -- $line
-  IFS="$old_ifs"
-  for word in "$@"; do
-    [ -n "$word" ] && bwrap_args[${#bwrap_args[@]}]="$word"
-  done
-done < "$bwrap_args_file"
-rm -f "$bwrap_args_file"
+# Build the bwrap argv into an array. Never via eval: the sandboxed command's
+# own quoting has to survive intact.
+load_bwrap_argv "$config" || exit 1
 
 if [ "$do_dry_run" = "true" ]; then
   printf 'bwrap'
-  for arg in "${bwrap_args[@]}" "${cmd_args[@]}"; do
+  for arg in "${WRAPIT_BWRAP_ARGV[@]}" "${cmd_args[@]}"; do
     printf ' %q' "$arg"
   done
   printf '\n'
@@ -261,4 +250,4 @@ if [ "$do_dry_run" = "true" ]; then
 fi
 
 # Execute: replace this process with bwrap running the sandboxed command
-exec bwrap "${bwrap_args[@]}" "${cmd_args[@]}"
+exec bwrap "${WRAPIT_BWRAP_ARGV[@]}" "${cmd_args[@]}"

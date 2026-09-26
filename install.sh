@@ -10,6 +10,36 @@ DEFAULTS_FILE="$DEFAULTS_DIR/defaults.wrapit"
 PATH_MARKER="# wrapit — added by wrapit install.sh"
 
 # ---------------------------------------------------------------------------
+# Options
+# ---------------------------------------------------------------------------
+
+NO_PATH=false
+
+_usage() {
+  cat <<EOF
+Usage: bash install.sh [--no-path] [--help]
+
+  --no-path   Do not touch any shell rc file. Installs everything else and
+              prints the PATH line to add yourself. Use this when your dotfiles
+              are generated from a template, where an appended block would be
+              lost on the next regeneration.
+  --help      Show this help
+EOF
+}
+
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --no-path) NO_PATH=true; shift ;;
+    --help|-h) _usage; exit 0 ;;
+    *)
+      printf 'install: unknown option: %s\n' "$1" >&2
+      _usage >&2
+      exit 1
+      ;;
+  esac
+done
+
+# ---------------------------------------------------------------------------
 # Checks
 # ---------------------------------------------------------------------------
 
@@ -86,9 +116,14 @@ case ":${PATH}:" in
 esac
 
 if [ "$local_bin_on_path" = "false" ]; then
-  for rc in "$HOME/.bashrc" "$HOME/.zshrc" "$HOME/.config/fish/config.fish"; do
-    [ -f "$rc" ] && _add_path_block "$rc"
-  done
+  if [ "$NO_PATH" = "true" ]; then
+    printf '  Skipping shell rc files (--no-path). Add this yourself:\n'
+    printf '    export PATH="$HOME/.local/bin:$PATH"\n'
+  else
+    for rc in "$HOME/.bashrc" "$HOME/.zshrc" "$HOME/.config/fish/config.fish"; do
+      [ -f "$rc" ] && _add_path_block "$rc"
+    done
+  fi
 fi
 
 # User defaults file
@@ -96,27 +131,36 @@ mkdir -p "$DEFAULTS_DIR"
 if [ ! -f "$DEFAULTS_FILE" ]; then
   cat > "$DEFAULTS_FILE" <<'EOF'
 # ~/.config/wrapit/defaults.wrapit
-# User-level defaults applied to every project.
+# User-level defaults, merged before every project's .wrapit. The project file
+# is parsed second, so it wins on any setting or path these lines also cover.
+#
+# Keep every binding here optional (ro? / rw?). A plain ro or rw naming a path
+# that does not exist is an error, and an error here breaks every project.
 
 [sandbox]
 ssh_agent       = true
 unshare_pid     = true
+unshare_ipc     = true
+unshare_uts     = true
+unshare_cgroup  = true
 die_with_parent = true
 tmpfs_tmp       = true
 
 [network]
 enabled = true
 
-ro  ~/.gitconfig
+ro? ~/.gitconfig
 ro? ~/.config/git
 ro? ~/.nvm
 ro? ~/.fnm
 ro? ~/.volta
-rw  ~/.npm
+rw? ~/.npm
 EOF
   printf '  Created %s\n' "$DEFAULTS_FILE"
 fi
 
 printf '\nwrapit %s installed successfully.\n' "$(cat "$INSTALL_DIR/wrapit" | grep '^WRAPIT_VERSION=' | cut -d'"' -f2 || printf 'unknown')"
-printf 'Run: source ~/.bashrc   (or open a new terminal)\n'
+if [ "$NO_PATH" = "false" ]; then
+  printf 'Run: source ~/.bashrc   (or open a new terminal)\n'
+fi
 printf 'Then: wrapit --help\n'

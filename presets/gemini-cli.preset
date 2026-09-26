@@ -11,3 +11,11 @@ rw  ~/.gemini
 # ── npm package cache ──────────────────────────────────────────────────────────
 # Read/write: cached packages persist across sessions.
 rw  ~/.npm
+
+# ── Environment ────────────────────────────────────────────────────────────────
+# The base above starts the sandbox with an empty environment, so the keys this
+# agent reads have to be named here. Names that are unset on the host are
+# skipped silently; add any others your setup uses.
+[env]
+pass  = GEMINI_API_KEY GOOGLE_API_KEY
+pass  = GOOGLE_GENAI_USE_VERTEXAI GOOGLE_CLOUD_PROJECT GOOGLE_CLOUD_LOCATION

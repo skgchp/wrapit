@@ -37,8 +37,9 @@ done
 # Ask about defaults file
 if [ -d "$DEFAULTS_DIR" ]; then
   printf '\nRemove user defaults at %s? [y/N] ' "$DEFAULTS_DIR"
-  local ans
-  if IFS= read -r ans && [ "$ans" = "y" ] || [ "$ans" = "Y" ]; then
+  ans=""
+  IFS= read -r ans || true
+  if [ "$ans" = "y" ] || [ "$ans" = "Y" ]; then
     rm -rf "$DEFAULTS_DIR"
     printf '  Removed %s\n' "$DEFAULTS_DIR"
   else

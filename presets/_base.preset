@@ -1,13 +1,17 @@
 ---
 name: _base
-description: Common base included in all presets (sandbox, network, git identity)
+description: Common base included in all presets (sandbox, network, env, git identity)
 ---
 # ── Sandbox ────────────────────────────────────────────────────────────────────
 # SSH agent socket is forwarded so git push/clone works without exposing keys.
 # PID namespace and die_with_parent keep the sandbox lifecycle clean.
+# IPC, UTS and cgroup namespaces are unshared too — near-free isolation.
 [sandbox]
 ssh_agent       = true
 unshare_pid     = true
+unshare_ipc     = true
+unshare_uts     = true
+unshare_cgroup  = true
 die_with_parent = true
 tmpfs_tmp       = true
 
@@ -16,23 +20,22 @@ tmpfs_tmp       = true
 [network]
 enabled = true
 
+# ── Environment ────────────────────────────────────────────────────────────────
+# Deny-by-default, to match how paths are handled: the sandbox starts with an
+# empty environment and gets back only what is listed. Without this, everything
+# in your shell reaches the agent — AWS_SECRET_ACCESS_KEY, GITHUB_TOKEN, a
+# DATABASE_URL from a direnv you forgot you were in.
+#
+# The agent's own API keys are passed by its preset below. Anything else your
+# project needs goes in the [env] section of the generated .wrapit, either as
+# another `pass` name or, for secrets, via `file = ~/.config/wrapit/env`.
+[env]
+clear = true
+pass  = TZ COLORTERM NO_COLOR TERM_PROGRAM
+pass  = http_proxy https_proxy no_proxy HTTP_PROXY HTTPS_PROXY NO_PROXY
+pass  = SSL_CERT_FILE SSL_CERT_DIR CURL_CA_BUNDLE NODE_EXTRA_CA_CERTS
+
 # ── Git identity ───────────────────────────────────────────────────────────────
 # Read-only: agent can commit with your identity but cannot change git config.
 ro  ~/.gitconfig
 ro? ~/.config/git
-
-# ── Local dev environments (Lando / ddev) ──────────────────────────────────────
-# Read/write: global config, cache, certs, plugins, and runtime state.
-# Lando installs versioned binaries to ~/.cache/lando/<ver>/bin/lando and
-# symlinks ~/.lando/bin/lando to the active version — both directories must be
-# mounted or the symlink target is unreachable inside the sandbox.
-# ddev uses /usr/bin/ddev (covered by the hardcoded /usr ro mount).
-rw? ~/.lando
-rw? ~/.cache/lando
-rw? ~/.ddev
-# Docker socket: required for both tools to manage containers. WARNING: this
-# grants the agent the ability to spawn arbitrary containers, which is a
-# potential sandbox escape. Accept this risk only when the agent needs to run
-# dev environment commands (lando start, ddev exec, etc.). Remove this line for
-# projects that do not use Lando or ddev.
-rw? /var/run/docker.sock

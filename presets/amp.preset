@@ -10,3 +10,10 @@ rw  ~/.config/amp
 # ── Amp data ──────────────────────────────────────────────────────────────────
 # Read/write: stores session history and agent state.
 rw  ~/.local/share/amp
+
+# ── Environment ────────────────────────────────────────────────────────────────
+# The base above starts the sandbox with an empty environment, so the keys this
+# agent reads have to be named here. Names that are unset on the host are
+# skipped silently; add any others your setup uses.
+[env]
+pass  = AMP_API_KEY AMP_URL

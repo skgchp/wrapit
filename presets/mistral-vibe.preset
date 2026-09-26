@@ -14,3 +14,10 @@ ro? ~/.local/bin
 # ── uv tool cache ─────────────────────────────────────────────────────────────
 # Read/write (optional): cache persists across sessions to speed up installs.
 rw? ~/.cache/uv
+
+# ── Environment ────────────────────────────────────────────────────────────────
+# The base above starts the sandbox with an empty environment, so the keys this
+# agent reads have to be named here. Names that are unset on the host are
+# skipped silently; add any others your setup uses.
+[env]
+pass  = MISTRAL_API_KEY
