@@ -10,3 +10,11 @@ rw  ~/.config/goose
 # ── Goose data ─────────────────────────────────────────────────────────────────
 # Read/write: stores session history and agent state.
 rw  ~/.local/share/goose
+
+# ── Environment ────────────────────────────────────────────────────────────────
+# The base above starts the sandbox with an empty environment, so the keys this
+# agent reads have to be named here. Names that are unset on the host are
+# skipped silently; add any others your setup uses.
+[env]
+pass  = OPENAI_API_KEY ANTHROPIC_API_KEY GOOGLE_API_KEY
+pass  = GROQ_API_KEY OPENROUTER_API_KEY DATABRICKS_HOST

@@ -5,3 +5,11 @@ description: Generic preset with no agent-specific paths (base only)
 ---
 # No agent-specific paths — includes only the common base (git identity, SSH
 # agent, sandbox settings). Add project-specific bindings in the section below.
+
+# ── Environment ────────────────────────────────────────────────────────────────
+# The base above starts the sandbox with an empty environment. Name the
+# variables your agent needs here, e.g.:
+#
+# [env]
+# pass  = OPENAI_API_KEY
+# file  = ~/.config/wrapit/env      # KEY=VALUE, chmod 600

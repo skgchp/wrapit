@@ -18,3 +18,11 @@ rw  ~/.npm
 # Read/write: stores session token so you don't re-authenticate every run.
 rw  ~/.claude
 rw? ~/.claude.json
+
+# ── Environment ────────────────────────────────────────────────────────────────
+# The base above starts the sandbox with an empty environment, so the keys this
+# agent reads have to be named here. Names that are unset on the host are
+# skipped silently; add any others your setup uses.
+[env]
+pass  = ANTHROPIC_API_KEY ANTHROPIC_AUTH_TOKEN ANTHROPIC_BASE_URL
+pass  = ANTHROPIC_MODEL CLAUDE_CODE_USE_BEDROCK CLAUDE_CODE_USE_VERTEX

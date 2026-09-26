@@ -7,6 +7,9 @@ setup() {
   source "${BATS_TEST_DIRNAME}/../lib/presets.sh"
   source "${BATS_TEST_DIRNAME}/../lib/init.sh"
   TEST_DIR="$(mktemp -d)"
+  # The user defaults file is merged into every run, so tests must not pick up
+  # whatever the developer happens to have installed.
+  export WRAPIT_DEFAULTS_FILE=""
   ORIG_PWD="$PWD"
   cd "$TEST_DIR"
 }
@@ -52,6 +55,7 @@ _skip_if_no_preset() {
 
 @test "--preset does not hang without a TTY" {
   _skip_if_no_preset "claude-code"
+  command -v timeout > /dev/null 2>&1 || skip "timeout(1) not available"
   run timeout 5 bash -c "
     source '${BATS_TEST_DIRNAME}/../lib/parse.sh'
     source '${BATS_TEST_DIRNAME}/../lib/check.sh'

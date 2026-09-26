@@ -16,12 +16,13 @@ The goal is to give agents the minimum filesystem access they need to do useful 
 
 ## Core Design Principles
 
-1. **Minimal by default.** System binaries are always mounted read-only. Everything else must be explicitly opted in via `.wrapit`.
-2. **Per-project config.** `.wrapit` lives in the project directory, committed to version control. The sandbox reflects the project's needs.
-3. **Global user defaults.** `~/.config/wrapit/defaults.wrapit` provides user-level defaults (e.g. SSH agent, git config) that every project inherits unless overridden.
-4. **Transparent.** `--dry-run` always shows the exact `bwrap` command that will be executed.
-5. **Verifiable.** `--test` runs a standard suite of sandbox integrity checks.
-6. **Harness-aware.** `--init` knows about common agent harnesses and proposes sensible defaults per harness.
+1. **Minimal by default.** System binaries are always mounted read-only. Everything else must be explicitly opted in via `.wrapit`. This holds for the environment as well as the filesystem — see [`[env]`](#sections).
+2. **Order is significant.** `bwrap` applies mount operations in the order given and `wrapit` preserves config order, so a later directive wins over an earlier one covering the same path. That is what lets a subtree be mounted `rw` with a single file pinned `ro` inside it.
+3. **Per-project config.** `.wrapit` lives in the project directory, committed to version control. The sandbox reflects the project's needs.
+4. **Global user defaults.** `~/.config/wrapit/defaults.wrapit` provides user-level defaults (e.g. SSH agent, git config) that every project inherits unless overridden.
+5. **Transparent.** `--dry-run` always shows the exact `bwrap` command that will be executed.
+6. **Verifiable.** `--test` runs a standard suite of sandbox integrity checks.
+7. **Harness-aware.** `--init` knows about common agent harnesses and proposes sensible defaults per harness.
 
 ---
 
@@ -100,6 +101,27 @@ key = value
 | `ro?` | Bind mount read-only, silently skip if path does not exist. |
 | `rw?` | Bind mount read/write, silently skip if path does not exist. |
 
+### Directive Order
+
+Directives are applied in the order they appear, and the user defaults file is
+applied before the project `.wrapit`. Where two directives cover the same path,
+the later one wins, because that is how `bwrap` applies mounts.
+
+This is the supported way to express "writable, except for this":
+
+```ini
+rw  ~/.pi                         # the agent needs this tree
+ro? ~/.pi/agent/models.json       # ...but must not repoint its own models
+ro? ~/.pi/agent/web-search.json   # ...or widen its own network reach
+```
+
+Reversing those lines silently gives the agent write access to both files: the
+`rw` mount of the parent is applied last and covers them again. `wrapit --check`
+warns when a known-sensitive file is left writable this way.
+
+`$PWD` is mounted before any directive from the config, so a `ro` directive can
+carve a read-only hole inside the working directory too.
+
 ### Path Expansion
 
 Paths support the following expansions:
@@ -116,14 +138,57 @@ Two optional INI-style sections control sandbox-level behaviour:
 
 ```ini
 [network]
-enabled = true        # true (default) | false
+enabled = true          # true (default) | false
 
 [sandbox]
-unshare_pid    = true  # true (default) | false
+unshare_pid     = true  # true (default) | false
+unshare_ipc     = true  # true (default) | false
+unshare_uts     = true  # true (default) | false
+unshare_cgroup  = true  # true (default) | false — emitted as --unshare-cgroup-try
 die_with_parent = true  # true (default) | false
-tmpfs_tmp      = true  # true (default) | false
-ssh_agent      = true  # true (default) | false — expose SSH_AUTH_SOCK (never key files)
+tmpfs_tmp       = true  # true (default) | false
+ssh_agent       = true  # true (default) | false — expose SSH_AUTH_SOCK (never key files)
+
+[env]
+clear = false           # false (default) | true — true emits --clearenv
+pass  = TZ COLORTERM    # names taken from the parent environment, when set
+file  = ~/.config/wrapit/env   # KEY=VALUE lines, expected to be chmod 600
+set   = PI_PROFILE=devbox      # a literal value
 ```
+
+The namespace toggles exist as escape hatches. `wrapit` deliberately does not
+use `--unshare-all`, which would also imply `--unshare-user-try` and change how
+uids are mapped; the namespaces are named individually instead. `unshare_cgroup`
+becomes `--unshare-cgroup-try` so that a kernel without cgroup namespaces
+degrades instead of failing the whole sandbox.
+
+#### `[env]`
+
+Without an `[env]` section the sandbox inherits the parent environment in full,
+which is how `wrapit` has always behaved and what a hand-written `.wrapit`
+depending on an inherited `OPENAI_API_KEY` still expects. It is also the one
+place where the tool is not deny-by-default: anything in your shell reaches the
+agent, including an `AWS_SECRET_ACCESS_KEY` or a `DATABASE_URL` from a `direnv`
+you have forgotten you are in.
+
+`clear = true` emits `--clearenv` and hands back only what is named. **Every
+shipped preset sets it**, with each agent's own API keys listed in its `pass`
+line, so a config made by `wrapit --init` is deny-by-default and a config
+written by hand is not changed under you.
+
+| Key | Meaning |
+|---|---|
+| `clear` | `true` starts from an empty environment (`--clearenv`). Default `false`. |
+| `pass` | Space-separated variable names taken from the parent environment. Names that are unset are skipped silently. Repeatable; values accumulate. |
+| `file` | A file of `KEY=VALUE` lines, for secrets that should not be in a committed config. Blank lines and lines starting with `#` are ignored, an `export ` prefix is allowed, and one layer of surrounding quotes is stripped. A mode looser than `600` is warned about. |
+| `set` | A literal `KEY=VALUE`. Repeatable. |
+
+`clear = false` with `pass`/`file`/`set` is valid and sometimes what you want:
+the environment is inherited *and* the named values are set on top.
+
+Precedence, lowest to highest: the always-present variables below, then `pass`,
+then `file`, then `set`. Within a merged config, the project `.wrapit` is applied
+after the user defaults, so it wins on `clear` and on any single variable.
 
 ### Hardcoded Minimum (not in .wrapit)
 
@@ -139,6 +204,10 @@ The following mounts are always applied regardless of `.wrapit` content. They ar
 --ro-bind /etc/ssl /etc/ssl
 --ro-bind /etc/passwd /etc/passwd
 --ro-bind /etc/group /etc/group
+--ro-bind /etc/nsswitch.conf      (skipped if absent — glibc name resolution)
+--ro-bind /etc/alternatives       (skipped if absent — Debian's symlink farm)
+--ro-bind /etc/localtime          (skipped if absent — local time, not UTC)
+--ro-bind /etc/ca-certificates.conf  (skipped if absent — some TLS stacks read it)
 --proc /proc
 --dev /dev
 --tmpfs /tmp                      (when sandbox.tmpfs_tmp = true)
@@ -146,6 +215,13 @@ The following mounts are always applied regardless of `.wrapit` content. They ar
 --setenv USER "$USER"
 --chdir "$PWD"
 ```
+
+The four distro-dependent `/etc` entries matter in practice. Without
+`nsswitch.conf`, glibc falls back to compiled-in defaults for name resolution
+rather than the host's policy. Without `/etc/alternatives`, a Debian
+`/usr/bin/node` that is a symlink into the farm has an unreachable target inside
+the sandbox. Without `/etc/localtime`, the agent's timestamps are UTC while
+yours are not.
 
 `$PWD` is always mounted read/write. It does not need to appear in `.wrapit` (though it may for clarity / documentation purposes; wrapit will deduplicate it).
 
@@ -182,6 +258,15 @@ ssh_agent = true
 [network]
 enabled = true
 
+# ── Environment ──────────────────────────────────────────────────────────────
+# Start from an empty environment and name what comes back, so that nothing
+# else in the shell — cloud credentials, tokens, a direnv's DATABASE_URL —
+# reaches the agent.
+[env]
+clear = true
+pass  = TZ COLORTERM
+pass  = ANTHROPIC_API_KEY ANTHROPIC_BASE_URL
+
 # ── Git identity ─────────────────────────────────────────────────────────────
 # Read-only: agent can commit with your identity but cannot change git config.
 ro  ~/.gitconfig
@@ -212,7 +297,14 @@ rw  $PWD
 
 ## Global User Defaults
 
-`~/.config/wrapit/defaults.wrapit` is merged before the project `.wrapit`. Project settings take precedence on conflicts (last-write wins on duplicate paths).
+`~/.config/wrapit/defaults.wrapit` is merged before the project `.wrapit`. Project settings take precedence on conflicts (last-write wins on duplicate paths), which follows from [Directive Order](#directive-order) rather than being a special case.
+
+Two consequences worth stating:
+
+- **Keep every binding in this file optional** (`ro?` / `rw?`). A plain `ro` or `rw` naming a path that does not exist is a hard error, and an error here breaks every project on the machine, not just one.
+- The file is parsed on every run, so `wrapit --check` scans it alongside the project config, and a `rw` mount that covers it is flagged: an agent that can rewrite your defaults can grant itself wider access the next time you run it.
+
+`WRAPIT_DEFAULTS_FILE` overrides the path, and setting it to the empty string disables the merge entirely. It exists for the test suite, which must not pick up whatever the developer happens to have installed.
 
 Example `defaults.wrapit`:
 
@@ -229,12 +321,14 @@ tmpfs_tmp       = true
 [network]
 enabled = true
 
-ro  ~/.gitconfig
+# Every binding here is optional: this file is merged into every project, so a
+# missing path would break all of them.
+ro? ~/.gitconfig
 ro? ~/.config/git
 ro? ~/.nvm
 ro? ~/.fnm
 ro? ~/.volta
-rw  ~/.npm
+rw? ~/.npm
 ```
 
 ---
@@ -282,7 +376,16 @@ Frontmatter fields:
 | `binary` | no | Binary name; `detect_harnesses` checks this during `--init` |
 | `description` | yes | Shown in `--help` and `--init` harness detection |
 
-The common base (`[sandbox]` settings, `[network]`, git identity) is stored in `presets/_base.preset` and is automatically prepended by `get_preset()`. Individual preset files contain only agent-specific paths.
+The common base (`[sandbox]` settings, `[network]`, `[env] clear = true` with a
+non-secret `pass` list, and git identity) is stored in `presets/_base.preset` and
+is automatically prepended by `get_preset()`. Individual preset files contain
+only agent-specific paths and the `pass` names for that agent's own API keys.
+
+Because `_base.preset` is prepended to *every* preset, anything placed in it is
+opted out of rather than into. Nothing belongs there that a given agent might not
+want — in particular no sandbox-escape path. Optional project tooling (Lando,
+ddev, the Docker socket) lives commented-out in the generated project section
+instead, where accepting it is visible in the project's own config.
 
 ### Generated `.wrapit` structure
 
@@ -337,9 +440,39 @@ Create `presets/<name>.preset` with the frontmatter above and add `.wrapit` dire
 | `rw ~/.aws`, `rw ~/.azure`, `rw ~/.config/gcloud` | Cloud credentials; prefer `ro` |
 | `rw ~/.gnupg` | GPG private keys |
 | Any `.env` file binding | May contain API keys or secrets |
-| `/var/run/docker.sock` | Agent could escape sandbox by spawning containers |
 | Paths containing `id_rsa`, `id_ed25519`, `id_ecdsa` | SSH private key files |
 | `[network] enabled = false` + `rw` on cloud credential dirs | Inconsistent; probably a config mistake |
+
+### Sandbox-escape paths
+
+Reported with a `SANDBOX ESCAPE PATH` label rather than as an ordinary warning,
+because these do not widen the sandbox, they end it. Flagged at **any**
+permission: a read-only bind of a socket is no defence, the socket is still
+there to be spoken to.
+
+| Pattern | Reason |
+|---|---|
+| `*/docker.sock`, `/var/run/docker`, `/run/docker` | Grants trivial root on the host: anything holding it can start a privileged container that mounts `/` |
+| `*/podman.sock` | Lets the agent start containers outside the sandbox |
+
+These are non-blocking, because some projects genuinely need them — a Lando or
+ddev workflow does not function without the Docker socket. No preset mounts one:
+the line is offered commented-out in the generated `.wrapit`, so that taking the
+trade is a visible decision in the project's own config.
+
+### Writable agent config inside an `rw` mount
+
+A directory mounted `rw` may contain a file that lets the agent widen its own
+policy for the next run. `--check` keeps a list of such files, resolves which
+directive covers each one *last*, and warns when the winner is writable. A `ro`
+directive placed after the `rw` mount silences it; the same directive placed
+before does not, matching what `bwrap` will actually do.
+
+| File | Why |
+|---|---|
+| `~/.pi/agent/models.json` | The agent could repoint its own model endpoint |
+| `~/.pi/agent/web-search.json` | The agent could widen its own fetch allow-list |
+| `~/.config/wrapit/defaults.wrapit` | The agent could grant itself wider access on the next run |
 
 ### Info notices (always shown during `--init`)
 
@@ -350,16 +483,27 @@ Create `presets/<name>.preset` with the frontmatter above and add `.wrapit` dire
 
 ## Sandbox Integrity Tests (`wrapit --test`)
 
-Runs 6 tests adapted from the blog post. Each test prints `PASS` or `FAIL` with a short explanation.
+Runs 6 tests adapted from the blog post. Each test prints `PASS`, `FAIL` or `SKIP` with a short explanation.
 
 | Test | What it checks |
 |---|---|
-| **T1: Home directory hidden** | `ls $HOME/.bashrc` and `ls $HOME/Documents` fail with "No such file or directory" |
-| **T2: Read-only paths unwritable** | `echo test >> ~/.gitconfig` fails with "Read-only file system" |
-| **T3: Working directory writable** | `touch wrapit-test-$$ && rm wrapit-test-$$` succeeds |
-| **T4: Process isolation** | `ps aux` shows ≤5 processes (only the shell and ps itself) |
+| **T1: Home directory hidden** | `$HOME/.bashrc` and `$HOME/Documents` do not exist inside the sandbox |
+| **T2: Read-only paths unwritable** | Appending to the first `ro` file the config mounts under `$HOME` fails. Taken from the config rather than hardcoded, and skipped when the config mounts no such file |
+| **T3: Working directory writable** | `touch` then `rm` of a scratch file in `$PWD` succeeds |
+| **T4: Process isolation** | `ps aux` shows ≤15 processes; the host has hundreds. The bound allows for the test's own pipeline |
 | **T5: /tmp isolation** | A file written to host `/tmp` before the test is not visible inside the sandbox |
-| **T6: SSH agent works, key hidden** | `ssh-add -l` succeeds; `cat ~/.ssh/id_ed25519` fails with "No such file or directory" (skipped if no key loaded) |
+| **T6: SSH agent works, key hidden** | `ssh-add -l` succeeds while `~/.ssh/id_ed25519` and `~/.ssh/id_rsa` do not exist (skipped if no key loaded) |
+
+**The harness must not use `eval`.** Each test is a `bash -c` script whose own
+quoting has to reach the sandbox intact, and `eval` concatenates its arguments
+and re-parses them, which destroys exactly that. The argv is built into an array
+by `load_bwrap_argv` and passed as `bwrap "${WRAPIT_BWRAP_ARGV[@]}" "$@"`. Under
+`eval`, `bash -c 'test ! -e "$HOME/.bashrc"'` became `bash -c test` with the rest
+as positional parameters, `$HOME` was expanded by the host shell, and every check
+reported `FAIL` on a sandbox that was working correctly. T2 was worse: its `>>`
+redirection was run by the host shell, appending to the real `~/.gitconfig` on
+every `--test`. Any path that needs a value interpolated passes it as `$1` rather
+than embedding it in the script.
 
 If `[network] enabled = false`, an additional test is run:
 
@@ -430,13 +574,19 @@ The main `wrapit` script sources the `lib/` files at startup using paths relativ
 1. **Checks prerequisites.** Verifies `bash` ≥ 3.2 and `bwrap` are installed. Prints install instructions for the user's distro if `bwrap` is missing (detects via `/etc/os-release`: apt / dnf / pacman / zypper).
 2. **Copies files.** Copies `wrapit`, `lib/`, and `presets/` to `~/.local/share/wrapit/`.
 3. **Creates the executable symlink** (or wrapper) at `~/.local/bin/wrapit`, pointing to `~/.local/share/wrapit/wrapit`. Creates `~/.local/bin/` if it does not exist.
-4. **Updates shell config.** Detects the user's active shell(s) by inspecting `$SHELL` and checking for the existence of `~/.bashrc`, `~/.zshrc`, `~/.config/fish/config.fish`. For each found config file, appends a `PATH` export block if `~/.local/bin` is not already on `$PATH`:
+4. **Updates shell config**, unless `--no-path` is given. Detects the user's active shell(s) by inspecting `$SHELL` and checking for the existence of `~/.bashrc`, `~/.zshrc`, `~/.config/fish/config.fish`. For each found config file, appends a `PATH` export block if `~/.local/bin` is not already on `$PATH`:
    ```bash
    # wrapit — added by wrapit install.sh
    export PATH="$HOME/.local/bin:$PATH"
    ```
    The block is idempotent: `install.sh` checks for the comment marker before appending, so re-running it is safe.
-5. **Creates the user defaults file.** Writes `~/.config/wrapit/defaults.wrapit` if it does not already exist, populated with sensible defaults (git config, SSH agent, npm cache).
+
+   `--no-path` skips this entirely and prints the line to add by hand. It exists
+   for managed dotfiles: a `~/.zshrc` generated from a template loses an
+   appended block on the next regeneration, silently, and the user additions
+   belong in whatever file that setup keeps them in (`~/.zshrc.local` and the
+   like).
+5. **Creates the user defaults file.** Writes `~/.config/wrapit/defaults.wrapit` if it does not already exist, populated with sensible defaults (git config, SSH agent, npm cache), all as optional bindings — see [Global User Defaults](#global-user-defaults).
 6. **Prints a success summary** listing every action taken, the detected shell(s), and instructions to `source ~/.bashrc` (or equivalent) or open a new terminal.
 
 ### What it does NOT do
@@ -448,16 +598,19 @@ The main `wrapit` script sources the `lib/` files at startup using paths relativ
 
 ### Invocation
 
+`install.sh` needs the source tree beside it — it copies `wrapit`, `lib/` and
+`presets/` out of its own directory — so installing means cloning first. There is
+deliberately **no `curl | bash` one-liner**: a tool whose job is to confine an
+agent is a poor candidate for an install path that pipes an unread script into a
+shell. It is worth saying so, since a one-liner is the usual expectation.
+
 ```bash
 git clone https://github.com/your-org/wrapit.git
 cd wrapit
 bash install.sh
-```
 
-Or via curl:
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/your-org/wrapit/main/install.sh | bash
+# or, when your dotfiles are generated and must not be appended to:
+bash install.sh --no-path
 ```
 
 ### `uninstall.sh`
@@ -584,7 +737,10 @@ The following host environment variables are always forwarded into the sandbox:
 - `SSH_AUTH_SOCK` (when `ssh_agent = true`)
 - `PATH` (from the host, so the agent finds the same binaries)
 
-Any additional `--setenv` directives can be added to `.wrapit` (future extension).
+Everything else depends on `[env]`. With no `[env] clear = true`, the rest of the
+parent environment is inherited as well; with it, the list above is all the
+sandbox starts with, plus whatever `pass`, `file` and `set` name. See
+[`[env]`](#env).
 
 ---
 
@@ -594,7 +750,8 @@ Any additional `--setenv` directives can be added to `.wrapit` (future extension
 - **No network namespace filtering.** `wrapit` uses `--share-net` (full network access) or no network at all. Domain allowlisting is not currently supported by bubblewrap without an additional tool (e.g. a DNS proxy or firewall rule).
 - **No GPU passthrough.** Sandboxed agents cannot access GPU devices. This affects locally-run models.
 - **No user namespace nesting.** Sandboxed agents cannot themselves spawn further `bwrap` sandboxes unless the kernel allows nested user namespaces.
-- **Docker-in-sandbox.** The Docker daemon socket is explicitly blocked by default. Agents that need to build containers (e.g. OpenHands) will need special handling.
+- **Docker-in-sandbox.** No preset mounts the Docker daemon socket, and `--check` flags it as a sandbox-escape path wherever it appears, but nothing blocks a config that opts into it. A project that needs containers takes the trade explicitly, in its own `.wrapit`.
+- **Bind paths may not contain spaces.** `build_bwrap_args` emits one flag per line and the argv loader splits on the first space, so a source path with a space in it is mis-split. `--setenv` values are exempt: the final operand of a line runs to the end of it, so environment values may contain spaces.
 
 ---
 

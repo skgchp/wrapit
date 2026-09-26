@@ -57,12 +57,48 @@ rw  $PWD
 
 # ── Project-specific bindings ──────────────────────────────────────────────────
 # Add paths specific to this project that are not covered by the preset above.
+# Later directives win over earlier ones, so a ro line below can carve a
+# read-only hole in an rw mount made above it.
 # See README.md for guidance on what to add here.
 #
 # Examples:
 #   rw? ~/.pyenv              # Python version manager
 #   rw? ~/.cargo              # Rust toolchain
 #   ro  ~/.aws                # AWS credentials (read-only)
+
+# ── Local dev environments (Lando / ddev) ──────────────────────────────────────
+# Uncomment for projects that use Lando or ddev. Read the warning first.
+#
+# Lando installs versioned binaries to ~/.cache/lando/<ver>/bin/lando and
+# symlinks ~/.lando/bin/lando to the active version — both directories must be
+# mounted or the symlink target is unreachable inside the sandbox.
+# ddev uses /usr/bin/ddev (covered by the hardcoded /usr ro mount).
+#
+# rw? ~/.lando
+# rw? ~/.cache/lando
+# rw? ~/.ddev
+#
+# WARNING — the Docker socket is a sandbox escape, not an ordinary mount.
+# Anything holding it can start a privileged container that mounts the host
+# filesystem, which is trivial root on this machine: it undoes every other line
+# in this file. Both Lando and ddev need it to manage containers. Uncomment it
+# only if this project genuinely runs dev-environment commands, and know that
+# you are trading the sandbox for them. `wrapit --check` flags it every time.
+#
+# rw? /var/run/docker.sock
+
+# ── Environment ────────────────────────────────────────────────────────────────
+# The preset above starts the sandbox with an empty environment and passes back
+# only what it names. Add anything else this project needs:
+#
+# [env]
+# pass  = DATABASE_URL           # taken from your shell, when it is set
+# file  = ~/.config/wrapit/env   # KEY=VALUE lines, chmod 600 — for secrets
+# set   = NODE_ENV=development   # a fixed value, whatever your shell holds
+#
+# Setting `clear = false` here would hand the agent your entire shell
+# environment instead. It is supported, for hand-written configs that relied on
+# it, but it means every credential in your shell reaches the agent.
 EOF
 }
 
